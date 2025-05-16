@@ -10,9 +10,11 @@ Menu Analyzer is a web application that uses AI to analyze restaurant menu photo
 
 ## Features
 
+- NVIDIA NIM APIs (VLLM and Stable Diffusion)
 - Photo upload for menu analysis
 - AI-powered menu item extraction
 - AI-generated food images (for menus with 5 or fewer items)
+- Calories calculation via prompt-engineering
 - Progressive loading with real-time updates
 - Responsive, modern UI built with React and Tailwind CSS
 
