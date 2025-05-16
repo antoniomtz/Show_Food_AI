@@ -1,7 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const https = require('https'); // Import https module
 require('dotenv').config();
+
+// Create an HTTPS agent with keepAlive set to false
+const httpsAgentNoKeepAlive = new https.Agent({ keepAlive: false });
+
+let prewarmDoneSuccessfully = false; // Flag to track pre-warm status
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,6 +27,13 @@ app.post('/api/analyze-menu', async (req, res) => {
   try {
     console.log('Received request to analyze menu');
     
+    // If pre-warming was just done, add a small delay before the first real request
+    if (prewarmDoneSuccessfully) {
+      console.log('Pre-warming was recently successful. Adding a 3-second delay before processing user request.');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      prewarmDoneSuccessfully = false; // Reset flag so this delay only happens once
+    }
+    
     const { image, prompt } = req.body;
     
     // Validate inputs
@@ -39,7 +52,7 @@ app.post('/api/analyze-menu', async (req, res) => {
       // Forward the request to Nvidia API with increased timeout
       let apiResponse;
       let retryCount = 0;
-      const maxRetries = 1; // Just retry once if it fails
+      const maxRetries = 2; // Increase to 2 retries (3 total attempts)
       
       while (retryCount <= maxRetries) {
         try {
@@ -65,7 +78,9 @@ app.post('/api/analyze-menu', async (req, res) => {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
               },
-              timeout: 120000 // 120 second timeout (increased from 60s)
+              // Increase timeout for first attempt
+              timeout: retryCount === 0 ? 180000 : 120000, // 3 min for first try, 2 min for retries
+              httpsAgent: httpsAgentNoKeepAlive // Use custom agent
             }
           );
           
@@ -80,8 +95,10 @@ app.post('/api/analyze-menu', async (req, res) => {
             throw retryError;
           }
           
-          // Wait 2 seconds before retrying
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Wait longer before retrying (exponential backoff)
+          const waitTime = 2000 * Math.pow(2, retryCount - 1); // 2s, 4s, 8s
+          console.log(`Waiting ${waitTime/1000} seconds before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
       }
       
@@ -232,6 +249,53 @@ function updateMenuItemsStatus(requestId, status) {
   imageGenerationStore.menuItems[requestId] = items;
 }
 
+// Prewarm the API to reduce initial request latency
+async function prewarmAPI() {
+  console.log('Pre-warming the Nvidia API to reduce initial request latency...');
+  const API_URL = process.env.VITE_NVIDIA_API_URL;
+  const API_TOKEN = process.env.VITE_NVIDIA_API_TOKEN;
+  const MODEL = process.env.VITE_NVIDIA_MODEL;
+  
+  if (!API_URL || !API_TOKEN || !MODEL) {
+    console.log('Missing API configuration, skipping pre-warming');
+    return;
+  }
+  
+  try {
+    // Send a minimal request to initialize the model
+    await axios.post(
+      API_URL,
+      {
+        model: MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: 'Hello'
+          }
+        ],
+        max_tokens: 10,
+        temperature: 0.5,
+        top_p: 0.95,
+        stream: false
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${API_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 120000,
+        httpsAgent: httpsAgentNoKeepAlive // Use custom agent
+      }
+    );
+    console.log('Pre-warming complete! API should respond faster to actual requests now.');
+    prewarmDoneSuccessfully = true; // Set flag on successful pre-warm
+  } catch (error) {
+    console.log('Pre-warming attempt failed:', error.message);
+    console.log('This is normal - the first actual request may still be slow.');
+  }
+}
+
 // Extract menu items from LLM response
 function extractMenuItems(response) {
   try {
@@ -308,7 +372,8 @@ async function generateFoodImage(description) {
             "Accept": "application/json"
           },
           timeout: 60000, // 60 second timeout
-          validateStatus: false // Don't throw errors for non-2xx status codes
+          validateStatus: false, // Don't throw errors for non-2xx status codes
+          httpsAgent: httpsAgentNoKeepAlive // Use custom agent
         }
       );
       
@@ -376,4 +441,6 @@ async function generateFoodImage(description) {
 // Start server
 app.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
+  // Pre-warm the API after server starts
+  prewarmAPI();
 }); 

@@ -1,11 +1,22 @@
 import React, { useState } from 'react';
 
-const MenuItemCard = ({ title, description, imageUrl, imageStatus }) => {
+const MenuItemCard = ({ title, description, imageUrl, imageStatus, calories }) => {
   const [imageError, setImageError] = useState(false);
   
   const handleImageError = (e) => {
     console.error(`Error loading image for ${title}:`, e);
     setImageError(true);
+  };
+
+  // Determine calorie color based on value
+  const getCalorieColor = () => {
+    if (!calories) return 'text-gray-400'; // Default for no calories
+    const calorieNum = parseInt(calories, 10);
+    if (isNaN(calorieNum)) return 'text-gray-400';
+    
+    if (calorieNum < 400) return 'text-green-400';
+    if (calorieNum < 700) return 'text-orange-400';
+    return 'text-red-400';
   };
 
   // Determine what message to show when there's no image
@@ -76,6 +87,13 @@ const MenuItemCard = ({ title, description, imageUrl, imageStatus }) => {
       <div className="p-6">
         <h3 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-green-300 mb-3">{title}</h3>
         <p className="text-cyan-100 mb-3">{description}</p>
+        {calories && (
+          <div className="mt-2 mb-2">
+            <span className={`font-bold ${getCalorieColor()}`}>
+              {calories} calories
+            </span>
+          </div>
+        )}
         {imageUrl && imageError && (
           <div className="mt-2 p-2 bg-red-900/30 rounded border border-red-500/30">
             <p className="text-red-300 text-xs">Error loading image</p>

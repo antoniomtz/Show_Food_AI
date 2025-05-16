@@ -23,6 +23,7 @@ const MenuItemGrid = ({ menuItems }) => {
             description={item.description}
             imageUrl={item.imageUrl}
             imageStatus={item.imageStatus || 'none'}
+            calories={item.calories}
           />
         </div>
       ))}

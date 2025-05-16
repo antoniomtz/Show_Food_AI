@@ -1,14 +1,33 @@
 import axios from 'axios';
+// Note: The 'https' import is for Node.js context and won't directly affect browser keep-alive behavior
+// but we keep the structure for consistency if this module were ever used server-side.
+import https from 'https'; 
 
 // Local proxy server URL
 const PROXY_URL = 'http://localhost:3001/api/analyze-menu';
 const POLL_URL = 'http://localhost:3001/api/menu-images';
+const HEALTH_URL = 'http://localhost:3001/api/health';
+const RESET_URL = 'http://localhost:3001/api/reset-connection';
 
 // Enable for debug logging
 const DEBUG = true;
 
 // Global callback for progress updates
 let progressCallback = null;
+
+// Create an axios instance for client-side requests
+const clientAxiosInstance = axios.create({
+  // For Node.js context, this would be effective with a real https.Agent.
+  // In the browser, this specific httpsAgent config has no direct effect.
+  // Browser connection management is handled by the browser itself.
+  httpsAgent: typeof window === 'undefined' ? new https.Agent({ keepAlive: false }) : undefined,
+  headers: {
+    // Suggesting 'Connection: close' can sometimes influence servers,
+    // but modern HTTP/1.1 clients and servers usually manage persistence automatically.
+    // For HTTP/2, this header is ignored.
+    // 'Connection': 'close' // Generally not recommended for modern clients
+  }
+});
 
 // Converts image to base64 for API transmission
 const convertImageToBase64 = (file) => {
@@ -25,10 +44,48 @@ export const setProgressCallback = (callback) => {
   progressCallback = callback;
 };
 
+// Check API health status
+export const checkApiHealth = async () => {
+  try {
+    if (DEBUG) console.log('Checking API health via client instance...');
+    const response = await clientAxiosInstance.get(HEALTH_URL);
+    return response.data;
+  } catch (error) {
+    console.error('Error checking API health:', error);
+    return { apiHealthy: false, error: error.message }; // Return a consistent error structure
+  }
+};
+
+// Reset API connection
+export const resetApiConnection = async () => {
+  try {
+    if (DEBUG) console.log('Attempting to reset API connection via client instance...');
+    const response = await clientAxiosInstance.post(RESET_URL);
+    return response.data;
+  } catch (error) {
+    console.error('Error resetting API connection:', error);
+    return { success: false, error: error.message }; // Return a consistent error structure
+  }
+};
+
 // Extracts menu items from image using LLM API
 export const extractMenuItems = async (imageFile) => {
   try {
     if (DEBUG) console.log('Starting extractMenuItems with file:', imageFile.name);
+    
+    // Check API health before making the request
+    const healthStatus = await checkApiHealth();
+    if (DEBUG) console.log('API health status:', healthStatus);
+    
+    // If the API is not healthy and the last successful request was more than 2 minutes ago
+    if (!healthStatus.apiHealthy && (!healthStatus.lastSuccessfulRequest || 
+        new Date() - new Date(healthStatus.lastSuccessfulRequest) > 2 * 60 * 1000)) {
+      if (DEBUG) console.log('API appears unhealthy, attempting to reset connection');
+      await resetApiConnection();
+      if (progressCallback) {
+        progressCallback('Resetting API connection, this may take a moment...');
+      }
+    }
     
     // Start progress updates
     let elapsedTime = 0;
@@ -47,8 +104,10 @@ export const extractMenuItems = async (imageFile) => {
           progressCallback('Still working on analyzing your menu...');
         } else if (elapsedTime <= 60) {
           progressCallback('Almost there! Processing menu items...');
-        } else {
+        } else if (elapsedTime <= 120) {
           progressCallback(`Analysis in progress (${elapsedTime}s elapsed)`);
+        } else {
+          progressCallback(`This request is taking longer than usual. Consider refreshing and trying again. (${elapsedTime}s elapsed)`);
         }
       }
     }, 3000);
@@ -61,7 +120,7 @@ export const extractMenuItems = async (imageFile) => {
       throw new Error("Image is too large. Please upload a smaller image (max 180KB).");
     }
     
-    const prompt = `Analyze this restaurant menu image carefully. Extract all menu items and create a JSON array where each item is an object with 'title' and 'description' fields. Format your response as: [{"title":"Dish Name", "description":"Dish description"}]. Only include this JSON array in your response.`;
+    const prompt = `Analyze this restaurant menu image carefully. Extract all menu items and create a JSON array where each item is an object with 'title', 'description', and 'calories' fields. The 'calories' field should be your estimation of the calories in the dish based on the description and assuming a single serving portion. Format your response as: [{"title":"Dish Name", "description":"Dish description", "calories": 450}]. Only include this JSON array in your response.`;
     
     if (DEBUG) {
       console.log('Using proxy URL:', PROXY_URL);
@@ -70,11 +129,11 @@ export const extractMenuItems = async (imageFile) => {
     
     try {
       // Send request to our proxy server with proper timeout
-      const response = await axios.post(PROXY_URL, {
+      const response = await clientAxiosInstance.post(PROXY_URL, {
         image: base64Image,
         prompt: prompt
       }, {
-        timeout: 120000 // Increased to 120 seconds to account for image generation
+        timeout: 180000 // 3 minute timeout for initial requests
       });
       
       // Stop the progress interval
@@ -107,7 +166,10 @@ export const extractMenuItems = async (imageFile) => {
       
       // If it's a timeout, provide a more specific error
       if (axiosError.message.includes('timeout')) {
-        throw new Error('The menu analysis is taking too long. Please try again (you can try refreshing the page and uploading the same image again).');
+        // Try to reset the API connection in the background
+        resetApiConnection().catch(e => console.error('Error trying to reset connection after timeout:', e));
+        
+        throw new Error('The menu analysis is taking too long. Please try refreshing the page and uploading the same image again.');
       }
       
       throw axiosError;
@@ -137,7 +199,7 @@ const startPollingForImages = (requestId, initialItems, callback) => {
   // Poll every 2 seconds
   const pollInterval = setInterval(async () => {
     try {
-      const response = await axios.get(`${POLL_URL}/${requestId}`);
+      const response = await clientAxiosInstance.get(`${POLL_URL}/${requestId}`);
       
       if (DEBUG) console.log('Poll response:', response.data);
       

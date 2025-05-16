@@ -9,6 +9,26 @@ function App() {
   const [menuItems, setMenuItems] = useState(null);
   const [error, setError] = useState(null);
   const [processingTime, setProcessingTime] = useState(0);
+  const [isFirstVisit, setIsFirstVisit] = useState(true);
+  
+  // Check if this is the first visit
+  useEffect(() => {
+    const hasVisited = localStorage.getItem('hasVisitedBefore');
+    if (hasVisited) {
+      setIsFirstVisit(false);
+    } else {
+      localStorage.setItem('hasVisitedBefore', 'true');
+    }
+    
+    // Auto-dismiss first visit notice after 10 seconds
+    if (isFirstVisit) {
+      const timer = setTimeout(() => {
+        setIsFirstVisit(false);
+      }, 10000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isFirstVisit]);
   
   // Set up the update callback for image polling
   useEffect(() => {
@@ -29,16 +49,24 @@ function App() {
       setLoadingStage(message);
     });
     
-    // Cleanup function
+    // Introduce a small delay on initial app load before allowing API calls
+    // This is a one-time effect on component mount
+    const initialLoadTimer = setTimeout(() => {
+      // You could set a state here like setIsAppReady(true) if needed,
+      // but for just a delay, this is enough.
+      console.log('App ready after initial short delay.');
+    }, 200); // 200ms delay
+
     return () => {
       setMenuItemsUpdateCallback(null);
       setProgressCallback(null);
+      clearTimeout(initialLoadTimer); // Clear timeout on unmount
     };
-  }, []);
+  }, []); // Empty dependency array means this runs once on mount
 
   const handleImageUpload = async (imageFile) => {
     setIsLoading(true);
-    setLoadingStage('Analyzing menu image...');
+    setLoadingStage('Initializing analysis...'); // New initial stage
     setError(null);
     setMenuItems(null);
     setProcessingTime(0);
@@ -90,10 +118,40 @@ function App() {
   const handleRefresh = () => {
     window.location.reload();
   };
+  
+  // Dismiss the first visit notice
+  const dismissFirstVisitNotice = () => {
+    setIsFirstVisit(false);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-indigo-900 py-12 px-4 sm:px-6 lg:px-8 text-white">
       <div className="max-w-5xl mx-auto">
+        {isFirstVisit && (
+          <div className="mb-8 p-4 rounded-lg bg-blue-900/50 border border-blue-500/50 shadow-lg">
+            <div className="flex items-start">
+              <div className="flex-1">
+                <h3 className="font-bold text-blue-300 flex items-center">
+                  <i className="fas fa-info-circle mr-2"></i>
+                  First-time Visit Notice
+                </h3>
+                <p className="mt-2 text-blue-100">
+                  The first image analysis may take up to 2 minutes as our AI system initializes.
+                  Subsequent analyses will be much faster! If your first request times out, 
+                  please try again - the system will already be warmed up.
+                </p>
+              </div>
+              <button 
+                onClick={dismissFirstVisitNotice}
+                className="text-blue-300 hover:text-white"
+                aria-label="Dismiss notice"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+        )}
+        
         <div className="text-center mb-12">
           <div className="flex justify-center mb-6">
           </div>
