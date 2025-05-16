@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import MenuItemGrid from './components/MenuItemGrid';
-import { extractMenuItems, setMenuItemsUpdateCallback } from './api/menuApiService';
+import { extractMenuItems, setMenuItemsUpdateCallback, setProgressCallback } from './api/menuApiService';
 
 function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState('');
   const [menuItems, setMenuItems] = useState(null);
   const [error, setError] = useState(null);
+  const [processingTime, setProcessingTime] = useState(0);
   
   // Set up the update callback for image polling
   useEffect(() => {
@@ -23,9 +24,15 @@ function App() {
       }
     });
     
+    // Register callback for API progress updates
+    setProgressCallback((message) => {
+      setLoadingStage(message);
+    });
+    
     // Cleanup function
     return () => {
       setMenuItemsUpdateCallback(null);
+      setProgressCallback(null);
     };
   }, []);
 
@@ -34,12 +41,23 @@ function App() {
     setLoadingStage('Analyzing menu image...');
     setError(null);
     setMenuItems(null);
+    setProcessingTime(0);
+    
+    // Start a timer to show processing time
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setProcessingTime(elapsed);
+    }, 1000);
     
     try {
       console.log("Processing image:", imageFile.name);
       
       // Call the API with the image
       const extractedItems = await extractMenuItems(imageFile);
+      
+      // Clear the timer
+      clearInterval(timer);
       
       setMenuItems(extractedItems);
       // Now that we have items with loading state, update the loading stage
@@ -58,11 +76,19 @@ function App() {
         setIsLoading(false);
       }
     } catch (err) {
+      // Clear the timer
+      clearInterval(timer);
+      
       console.error('Error processing menu:', err);
       setError(`Failed to process the menu image: ${err.message || 'Please try again with a clearer image'}`);
       setIsLoading(false);
       setLoadingStage('');
     }
+  };
+
+  // Function to refresh the page
+  const handleRefresh = () => {
+    window.location.reload();
   };
 
   return (
@@ -71,7 +97,8 @@ function App() {
         <div className="text-center mb-12">
           <div className="flex justify-center mb-6">
           </div>
-          <h1 className="text-5xl font-bold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-500">
+          <h1 className="text-5xl font-bold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-500 flex items-center justify-center">
+            <i className="fas fa-utensils text-cyan-400 mr-4"></i>
             Transform Menus into Visual Delights
           </h1>
           <p className="text-xl text-cyan-100 max-w-2xl mx-auto">
@@ -90,6 +117,21 @@ function App() {
               <p className="text-cyan-200 max-w-md">
                 Please wait while our AI works its magic on your menu.
               </p>
+              {processingTime > 45 && (
+                <div className="bg-indigo-900/50 border border-cyan-500/30 p-4 rounded-lg mt-4 max-w-lg mx-auto">
+                  <p className="text-cyan-300 mb-2">This is taking longer than usual.</p>
+                  <p className="text-cyan-200 text-sm mb-4">
+                    The first request to our AI service can sometimes take extra time to initialize.
+                    If this continues for more than 90 seconds, you can try refreshing and uploading again.
+                  </p>
+                  <button 
+                    onClick={handleRefresh}
+                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-md transition-colors"
+                  >
+                    Refresh Page
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -99,6 +141,14 @@ function App() {
             <div className="bg-red-900/40 p-4 rounded-lg border border-red-500 inline-block">
               <p className="text-red-300 mb-1">⚠️ Error</p>
               <p className="text-red-100">{error}</p>
+              {error.includes('taking too long') && (
+                <button 
+                  onClick={handleRefresh}
+                  className="mt-4 px-4 py-2 bg-red-800 hover:bg-red-700 text-white rounded-md transition-colors"
+                >
+                  Refresh Page
+                </button>
+              )}
             </div>
           </div>
         )}

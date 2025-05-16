@@ -7,6 +7,9 @@ const POLL_URL = 'http://localhost:3001/api/menu-images';
 // Enable for debug logging
 const DEBUG = true;
 
+// Global callback for progress updates
+let progressCallback = null;
+
 // Converts image to base64 for API transmission
 const convertImageToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -17,15 +20,44 @@ const convertImageToBase64 = (file) => {
   });
 };
 
+// Set the progress callback function
+export const setProgressCallback = (callback) => {
+  progressCallback = callback;
+};
+
 // Extracts menu items from image using LLM API
 export const extractMenuItems = async (imageFile) => {
   try {
     if (DEBUG) console.log('Starting extractMenuItems with file:', imageFile.name);
     
+    // Start progress updates
+    let elapsedTime = 0;
+    const progressInterval = setInterval(() => {
+      elapsedTime += 3;
+      
+      // Only send specific updates at certain time intervals
+      if (progressCallback) {
+        if (elapsedTime <= 3) {
+          progressCallback('Preparing image for analysis...');
+        } else if (elapsedTime <= 10) {
+          progressCallback('Sending image to AI model...');
+        } else if (elapsedTime <= 20) {
+          progressCallback('AI analyzing menu contents (this may take a minute)...');
+        } else if (elapsedTime <= 40) {
+          progressCallback('Still working on analyzing your menu...');
+        } else if (elapsedTime <= 60) {
+          progressCallback('Almost there! Processing menu items...');
+        } else {
+          progressCallback(`Analysis in progress (${elapsedTime}s elapsed)`);
+        }
+      }
+    }, 3000);
+    
     const base64Image = await convertImageToBase64(imageFile);
     if (DEBUG) console.log(`Converted image to base64, length: ${base64Image.length} chars`);
     
     if (base64Image.length > 180000) {
+      clearInterval(progressInterval);
       throw new Error("Image is too large. Please upload a smaller image (max 180KB).");
     }
     
@@ -45,6 +77,9 @@ export const extractMenuItems = async (imageFile) => {
         timeout: 120000 // Increased to 120 seconds to account for image generation
       });
       
+      // Stop the progress interval
+      clearInterval(progressInterval);
+      
       if (DEBUG) console.log('API response received with menu items and loading state for images');
       
       // Get the initial menu items with requestId
@@ -59,6 +94,9 @@ export const extractMenuItems = async (imageFile) => {
       return menuItems;
       
     } catch (axiosError) {
+      // Stop the progress interval
+      clearInterval(progressInterval);
+      
       if (DEBUG) {
         console.log('Axios error:', axiosError);
         if (axiosError.response) {
@@ -69,7 +107,7 @@ export const extractMenuItems = async (imageFile) => {
       
       // If it's a timeout, provide a more specific error
       if (axiosError.message.includes('timeout')) {
-        throw new Error('The menu analysis and image generation is taking too long. Please try again with a clearer image.');
+        throw new Error('The menu analysis is taking too long. Please try again (you can try refreshing the page and uploading the same image again).');
       }
       
       throw axiosError;

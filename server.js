@@ -37,35 +37,58 @@ app.post('/api/analyze-menu', async (req, res) => {
     
     try {
       // Forward the request to Nvidia API with increased timeout
-      const response = await axios.post(
-        API_URL,
-        {
-          model: MODEL,
-          messages: [
+      let apiResponse;
+      let retryCount = 0;
+      const maxRetries = 1; // Just retry once if it fails
+      
+      while (retryCount <= maxRetries) {
+        try {
+          console.log(`API request attempt ${retryCount + 1}/${maxRetries + 1}`);
+          apiResponse = await axios.post(
+            API_URL,
             {
-              role: 'user',
-              content: `${prompt} <img src="data:image/png;base64,${image}" />`
+              model: MODEL,
+              messages: [
+                {
+                  role: 'user',
+                  content: `${prompt} <img src="data:image/png;base64,${image}" />`
+                }
+              ],
+              max_tokens: 1024,
+              temperature: 0.5,
+              top_p: 0.95,
+              stream: false
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${API_TOKEN}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              timeout: 120000 // 120 second timeout (increased from 60s)
             }
-          ],
-          max_tokens: 1024,
-          temperature: 0.5,
-          top_p: 0.95,
-          stream: false
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${API_TOKEN}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          timeout: 60000 // 60 second timeout
+          );
+          
+          // If we get here, the request was successful
+          break;
+        } catch (retryError) {
+          retryCount++;
+          console.log(`API request attempt ${retryCount} failed: ${retryError.message}`);
+          
+          if (retryCount > maxRetries) {
+            // Rethrow the error if we've exhausted all retries
+            throw retryError;
+          }
+          
+          // Wait 2 seconds before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
-      );
+      }
       
       console.log('Received response from Nvidia API');
       
       // Extract menu items from the response
-      const menuItems = extractMenuItems(response.data);
+      const menuItems = extractMenuItems(apiResponse.data);
       console.log(`Extracted ${menuItems.length} menu items`);
       
       // Generate a request ID
