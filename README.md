@@ -1,9 +1,5 @@
 # Menu Analyzer
 
-<div align="center">
-  <img src="public/assets/logo.png" alt="Menu Analyzer Logo" width="200">
-</div>
-
 ## Overview
 
 Menu Analyzer is a web application that uses AI to analyze restaurant menu photos. Upload an image of a restaurant menu and get a structured list of menu items with AI-generated images of each dish.
