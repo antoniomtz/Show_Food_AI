@@ -13,6 +13,8 @@ const MenuItemGrid = ({ menuItems }) => {
           key={index}
           title={item.title}
           description={item.description}
+          imageUrl={item.imageUrl}
+          imageStatus={item.imageStatus || 'none'}
         />
       ))}
     </div>

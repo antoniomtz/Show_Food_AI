@@ -1,26 +1,10 @@
 import axios from 'axios';
 
-// Get environment variables
-const API_URL = import.meta.env.VITE_NVIDIA_API_URL;
-const API_TOKEN = import.meta.env.VITE_NVIDIA_API_TOKEN;
-const MODEL = import.meta.env.VITE_NVIDIA_MODEL;
-
 // Local proxy server URL
 const PROXY_URL = 'http://localhost:3001/api/analyze-menu';
 
 // Enable for debug logging
 const DEBUG = true;
-
-// Use mock data for development and testing
-const USE_MOCK_DATA = false;
-
-// Mock data for fallback and testing
-const MOCK_MENU_ITEMS = [
-  { title: "Guacamole", description: "Fresh avocados with tomatoes, onions, and lime" },
-  { title: "Nachos", description: "Tortilla chips with cheese, jalapeños, and sour cream" },
-  { title: "Tacos", description: "Corn tortillas with your choice of meat, onions, and cilantro" },
-  { title: "Quesadilla", description: "Flour tortilla filled with cheese and grilled to perfection" }
-];
 
 // Converts image to base64 for API transmission
 const convertImageToBase64 = (file) => {
@@ -37,12 +21,6 @@ export const extractMenuItems = async (imageFile) => {
   try {
     if (DEBUG) console.log('Starting extractMenuItems with file:', imageFile.name);
     
-    // If using mock data, return immediately
-    if (USE_MOCK_DATA) {
-      if (DEBUG) console.log('Using mock data instead of API call');
-      return MOCK_MENU_ITEMS;
-    }
-    
     const base64Image = await convertImageToBase64(imageFile);
     if (DEBUG) console.log(`Converted image to base64, length: ${base64Image.length} chars`);
     
@@ -58,34 +36,17 @@ export const extractMenuItems = async (imageFile) => {
     }
     
     try {
-      // Send request to our proxy server instead of directly to Nvidia
+      // Send request to our proxy server with proper timeout
       const response = await axios.post(PROXY_URL, {
         image: base64Image,
         prompt: prompt
+      }, {
+        timeout: 120000 // Increased to 120 seconds to account for image generation
       });
       
-      if (DEBUG) console.log('API response received:', response.data);
+      if (DEBUG) console.log('API response received with menu items and generated images');
       
-      // Extract content from the response
-      const content = response.data.choices[0].message.content;
-      if (DEBUG) console.log('Response content:', content);
-      
-      // Extract JSON array from the response content
-      const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
-      if (jsonMatch) {
-        const jsonString = jsonMatch[0];
-        if (DEBUG) console.log('Extracted JSON string:', jsonString);
-        try {
-          const menuItems = JSON.parse(jsonString);
-          return menuItems;
-        } catch (e) {
-          if (DEBUG) console.log('Error parsing JSON:', e);
-          throw new Error("Could not parse menu items from response");
-        }
-      } else {
-        if (DEBUG) console.log('No JSON array found in response content');
-        throw new Error("Could not extract menu items from response");
-      }
+      return response.data;
       
     } catch (axiosError) {
       if (DEBUG) {
@@ -95,6 +56,12 @@ export const extractMenuItems = async (imageFile) => {
           console.log('Response data:', axiosError.response.data);
         }
       }
+      
+      // If it's a timeout, provide a more specific error
+      if (axiosError.message.includes('timeout')) {
+        throw new Error('The menu analysis and image generation is taking too long. Please try again with a clearer image.');
+      }
+      
       throw axiosError;
     }
     

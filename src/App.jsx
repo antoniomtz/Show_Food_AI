@@ -5,46 +5,33 @@ import { extractMenuItems } from './api/menuApiService';
 
 function App() {
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
   const [menuItems, setMenuItems] = useState(null);
   const [error, setError] = useState(null);
-  const [useFallbackMode, setUseFallbackMode] = useState(false);
 
   const handleImageUpload = async (imageFile) => {
     setIsLoading(true);
+    setLoadingStage('Analyzing menu image...');
     setError(null);
     setMenuItems(null);
     
     try {
       console.log("Processing image:", imageFile.name);
-      // Call the real API with the image
+      
+      // Update loading stage for image generation
+      setLoadingStage('Analyzing menu and generating dish images...');
+      
+      // Call the API with the image
       const extractedItems = await extractMenuItems(imageFile);
+      
       setMenuItems(extractedItems);
     } catch (err) {
       console.error('Error processing menu:', err);
-      const errorMessage = err.message || 'Please try again';
-      setError(`Failed to process the menu image: ${errorMessage}`);
-      
-      // Don't show fallback option for image size errors
-      if (!errorMessage.includes("too large")) {
-        setUseFallbackMode(true);
-      }
+      setError(`Failed to process the menu image: ${err.message || 'Please try again with a clearer image'}`);
     } finally {
       setIsLoading(false);
+      setLoadingStage('');
     }
-  };
-
-  const handleUseFallback = () => {
-    // Use fallback mock data
-    setMenuItems([
-      { title: "Guacamole", description: "Fresh avocados with tomatoes, onions, and lime" },
-      { title: "Nachos", description: "Tortilla chips with cheese, jalapeños, and sour cream" },
-      { title: "Tacos", description: "Corn tortillas with your choice of meat, onions, and cilantro" },
-      { title: "Quesadilla", description: "Flour tortilla filled with cheese and grilled to perfection" },
-      { title: "Burrito", description: "Large flour tortilla wrapped around beans, rice, and meat" },
-      { title: "Enchiladas", description: "Corn tortillas rolled around filling and covered with chili sauce" }
-    ]);
-    setError(null);
-    setUseFallbackMode(false);
   };
 
   return (
@@ -52,22 +39,28 @@ function App() {
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Menu Analyzer</h1>
-          <p className="text-gray-600">Upload a photo of a restaurant menu to extract its items</p>
+          <p className="text-gray-600">Upload a photo of a restaurant menu to extract items and generate AI food images</p>
+          <p className="text-gray-500 text-sm mt-2">Note: AI-generated images are only created for menus with 5 or fewer items</p>
         </div>
         
         <ImageUploader onImageUpload={handleImageUpload} isLoading={isLoading} />
         
+        {isLoading && (
+          <div className="mt-10 text-center">
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+              <p className="text-gray-700">{loadingStage}</p>
+              <p className="text-sm text-gray-500 max-w-md">
+                Please wait while we process your menu.
+                This might take up to a minute as we extract menu items and generate images.
+              </p>
+            </div>
+          </div>
+        )}
+        
         {error && (
           <div className="mt-6 text-center">
             <p className="text-red-500 mb-3">{error}</p>
-            {useFallbackMode && (
-              <button 
-                onClick={handleUseFallback}
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-              >
-                Use Demo Mode Instead
-              </button>
-            )}
           </div>
         )}
         
@@ -76,6 +69,11 @@ function App() {
             <h2 className="text-2xl font-semibold text-gray-800 mb-6 text-center">
               Menu Items
             </h2>
+            {menuItems.length > 5 && (
+              <p className="text-center text-amber-600 mb-6">
+                This menu has more than 5 items. AI images were not generated to avoid long processing times.
+              </p>
+            )}
             <MenuItemGrid menuItems={menuItems} />
           </div>
         )}
