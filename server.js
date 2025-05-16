@@ -6,6 +6,12 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Simple in-memory store for tracking image generation
+const imageGenerationStore = {
+  menuItems: {},  // Will store menu items with their images when generated
+  getRequestId: () => Math.random().toString(36).substring(2, 15) // Simple ID generator
+};
+
 // Enable CORS for frontend requests
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -62,72 +68,31 @@ app.post('/api/analyze-menu', async (req, res) => {
       const menuItems = extractMenuItems(response.data);
       console.log(`Extracted ${menuItems.length} menu items`);
       
-      // Check if we should attempt image generation
-      if (!process.env.VITE_NVIDIA_API_TOKEN) {
-        console.log('No API token available for image generation. Returning menu items without images.');
-        return res.json(menuItems.map(item => ({ ...item, imageUrl: null })));
+      // Generate a request ID
+      const requestId = imageGenerationStore.getRequestId();
+      
+      // Create initial items with loading state
+      const initialItems = menuItems.map(item => ({
+        ...item,
+        imageUrl: null,
+        imageStatus: 'loading'
+      }));
+      
+      // Store the initial menu items for this request
+      imageGenerationStore.menuItems[requestId] = [...initialItems];
+      
+      // Send first response with text content and loading images
+      res.json({
+        requestId,
+        menuItems: initialItems
+      });
+      
+      // Then process images in the background
+      if (menuItems.length > 0) {
+        processImagesInBackground(menuItems, requestId);
       }
-      
-      if (menuItems.length > 5) {
-        console.log('Too many menu items. Skipping image generation.');
-        return res.json(menuItems.map(item => ({ ...item, imageUrl: null, imageStatus: 'skipped' })));
-      }
-      
-      // Add images to menu items (one at a time to avoid rate limiting)
-      const enhancedMenuItems = [];
-      let imageGenerationErrorCount = 0;
-      
-      for (const item of menuItems) {
-        console.log(`Processing menu item: ${item.title}`);
-        
-        let imageUrl = null;
-        let imageStatus = 'none';
-        
-        // Skip further image generation if we've had multiple failures
-        if (imageGenerationErrorCount < 2) {
-          try {
-            imageUrl = await generateFoodImage(item.description);
-            
-            if (imageUrl) {
-              console.log(`Image generation successful for: ${item.title}`);
-              imageStatus = 'success';
-            } else {
-              console.log(`Image generation failed for: ${item.title}`);
-              imageStatus = 'failed';
-              imageGenerationErrorCount++;
-            }
-          } catch (imgErr) {
-            console.error(`Error generating image for ${item.title}:`, imgErr.message);
-            imageStatus = 'error';
-            imageGenerationErrorCount++;
-          }
-        } else {
-          console.log(`Skipping image generation for ${item.title} due to previous failures`);
-          imageStatus = 'skipped';
-        }
-        
-        enhancedMenuItems.push({
-          ...item,
-          imageUrl,
-          imageStatus
-        });
-      }
-      
-      // Send the menu items back to client
-      return res.json(enhancedMenuItems);
     } catch (err) {
       console.error('Error in Nvidia API request:', err);
-      
-      // If the error happened after menu extraction, try to return the extracted items
-      if (err.menuItems) {
-        console.log('Returning extracted menu items despite error');
-        return res.json(err.menuItems.map(item => ({ 
-          ...item, 
-          imageUrl: null,
-          imageStatus: 'error'
-        })));
-      }
-      
       return res.status(500).json({ 
         error: 'Failed to process the menu image',
         message: err.message
@@ -146,6 +111,103 @@ app.post('/api/analyze-menu', async (req, res) => {
     });
   }
 });
+
+// Endpoint to poll for image generation status
+app.get('/api/menu-images/:requestId', (req, res) => {
+  const { requestId } = req.params;
+  
+  if (!imageGenerationStore.menuItems[requestId]) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+  
+  // Return the current state of the menu items for this request
+  res.json({
+    menuItems: imageGenerationStore.menuItems[requestId]
+  });
+});
+
+// Process images in background after text content is sent
+async function processImagesInBackground(menuItems, requestId) {
+  // Check if we should attempt image generation
+  if (!process.env.VITE_NVIDIA_API_TOKEN) {
+    console.log('No API token available for image generation.');
+    updateMenuItemsStatus(requestId, 'skipped');
+    return;
+  }
+  
+  if (menuItems.length > 5) {
+    console.log('Too many menu items. Skipping image generation.');
+    updateMenuItemsStatus(requestId, 'skipped');
+    return;
+  }
+  
+  // Add images to menu items (one at a time to avoid rate limiting)
+  let imageGenerationErrorCount = 0;
+  
+  for (let i = 0; i < menuItems.length; i++) {
+    const item = menuItems[i];
+    console.log(`Processing menu item: ${item.title}`);
+    
+    // Skip further image generation if we've had multiple failures
+    if (imageGenerationErrorCount < 2) {
+      try {
+        const imageUrl = await generateFoodImage(item.description);
+        
+        if (imageUrl) {
+          console.log(`Image generation successful for: ${item.title}`);
+          // Update the item in our store
+          updateMenuItemImage(requestId, i, imageUrl, 'success');
+        } else {
+          console.log(`Image generation failed for: ${item.title}`);
+          updateMenuItemImage(requestId, i, null, 'failed');
+          imageGenerationErrorCount++;
+        }
+      } catch (imgErr) {
+        console.error(`Error generating image for ${item.title}:`, imgErr.message);
+        updateMenuItemImage(requestId, i, null, 'error');
+        imageGenerationErrorCount++;
+      }
+    } else {
+      console.log(`Skipping image generation for ${item.title} due to previous failures`);
+      updateMenuItemImage(requestId, i, null, 'skipped');
+    }
+  }
+  
+  // Clean up after 10 minutes to prevent memory leaks
+  setTimeout(() => {
+    if (imageGenerationStore.menuItems[requestId]) {
+      console.log(`Cleaning up request ${requestId} from memory`);
+      delete imageGenerationStore.menuItems[requestId];
+    }
+  }, 10 * 60 * 1000);
+}
+
+// Helper to update a specific menu item's image
+function updateMenuItemImage(requestId, index, imageUrl, status) {
+  if (!imageGenerationStore.menuItems[requestId]) return;
+  
+  const items = [...imageGenerationStore.menuItems[requestId]];
+  if (index >= 0 && index < items.length) {
+    items[index] = {
+      ...items[index],
+      imageUrl,
+      imageStatus: status
+    };
+    imageGenerationStore.menuItems[requestId] = items;
+  }
+}
+
+// Helper to update all menu items' status
+function updateMenuItemsStatus(requestId, status) {
+  if (!imageGenerationStore.menuItems[requestId]) return;
+  
+  const items = imageGenerationStore.menuItems[requestId].map(item => ({
+    ...item,
+    imageStatus: status
+  }));
+  
+  imageGenerationStore.menuItems[requestId] = items;
+}
 
 // Extract menu items from LLM response
 function extractMenuItems(response) {
