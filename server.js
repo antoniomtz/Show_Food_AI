@@ -22,6 +22,21 @@ const imageGenerationStore = {
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    apiHealthy: true, 
+    lastSuccessfulRequest: new Date().toISOString() 
+  });
+});
+
+// Reset connection endpoint
+app.post('/api/reset-connection', (req, res) => {
+  // This is a simple implementation that just returns success
+  // In a more complex application, you might reset connection pools or other resources
+  res.json({ success: true });
+});
+
 // Proxy endpoint for Nvidia API to analyze menu
 app.post('/api/analyze-menu', async (req, res) => {
   try {
@@ -439,8 +454,11 @@ async function generateFoodImage(description) {
 }
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
   // Pre-warm the API after server starts
   prewarmAPI();
-}); 
+});
+
+// Disable keep-alive completely
+server.keepAliveTimeout = 0; 

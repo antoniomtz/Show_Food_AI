@@ -49,24 +49,16 @@ function App() {
       setLoadingStage(message);
     });
     
-    // Introduce a small delay on initial app load before allowing API calls
-    // This is a one-time effect on component mount
-    const initialLoadTimer = setTimeout(() => {
-      // You could set a state here like setIsAppReady(true) if needed,
-      // but for just a delay, this is enough.
-      console.log('App ready after initial short delay.');
-    }, 200); // 200ms delay
-
+    // Cleanup function
     return () => {
       setMenuItemsUpdateCallback(null);
       setProgressCallback(null);
-      clearTimeout(initialLoadTimer); // Clear timeout on unmount
     };
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
   const handleImageUpload = async (imageFile) => {
     setIsLoading(true);
-    setLoadingStage('Initializing analysis...'); // New initial stage
+    setLoadingStage('Analyzing menu image...');
     setError(null);
     setMenuItems(null);
     setProcessingTime(0);

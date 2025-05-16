@@ -15,6 +15,10 @@ const DEBUG = true;
 // Global callback for progress updates
 let progressCallback = null;
 
+// Current abort controllers for active requests
+let currentMenuAnalysisController = null;
+let currentPollingController = null;
+
 // Create an axios instance for client-side requests
 const clientAxiosInstance = axios.create({
   // For Node.js context, this would be effective with a real https.Agent.
@@ -22,10 +26,8 @@ const clientAxiosInstance = axios.create({
   // Browser connection management is handled by the browser itself.
   httpsAgent: typeof window === 'undefined' ? new https.Agent({ keepAlive: false }) : undefined,
   headers: {
-    // Suggesting 'Connection: close' can sometimes influence servers,
-    // but modern HTTP/1.1 clients and servers usually manage persistence automatically.
-    // For HTTP/2, this header is ignored.
-    // 'Connection': 'close' // Generally not recommended for modern clients
+    // Add Connection: close header to explicitly tell server not to keep connection alive
+    'Connection': 'close'
   }
 });
 
@@ -48,7 +50,14 @@ export const setProgressCallback = (callback) => {
 export const checkApiHealth = async () => {
   try {
     if (DEBUG) console.log('Checking API health via client instance...');
-    const response = await clientAxiosInstance.get(HEALTH_URL);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    const response = await clientAxiosInstance.get(HEALTH_URL, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
     return response.data;
   } catch (error) {
     console.error('Error checking API health:', error);
@@ -60,7 +69,14 @@ export const checkApiHealth = async () => {
 export const resetApiConnection = async () => {
   try {
     if (DEBUG) console.log('Attempting to reset API connection via client instance...');
-    const response = await clientAxiosInstance.post(RESET_URL);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    const response = await clientAxiosInstance.post(RESET_URL, {}, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
     return response.data;
   } catch (error) {
     console.error('Error resetting API connection:', error);
@@ -68,10 +84,31 @@ export const resetApiConnection = async () => {
   }
 };
 
+// Cancel any active requests
+const cancelActiveRequests = () => {
+  if (DEBUG) console.log('Cancelling any active requests');
+  
+  if (currentMenuAnalysisController) {
+    currentMenuAnalysisController.abort();
+    currentMenuAnalysisController = null;
+  }
+  
+  if (currentPollingController) {
+    currentPollingController.abort();
+    currentPollingController = null;
+  }
+};
+
 // Extracts menu items from image using LLM API
 export const extractMenuItems = async (imageFile) => {
   try {
+    // Cancel any existing in-flight requests first
+    cancelActiveRequests();
+    
     if (DEBUG) console.log('Starting extractMenuItems with file:', imageFile.name);
+    
+    // Create a new AbortController for this request
+    currentMenuAnalysisController = new AbortController();
     
     // Check API health before making the request
     const healthStatus = await checkApiHealth();
@@ -133,7 +170,8 @@ export const extractMenuItems = async (imageFile) => {
         image: base64Image,
         prompt: prompt
       }, {
-        timeout: 180000 // 3 minute timeout for initial requests
+        timeout: 180000, // 3 minute timeout for initial requests
+        signal: currentMenuAnalysisController.signal
       });
       
       // Stop the progress interval
@@ -146,7 +184,7 @@ export const extractMenuItems = async (imageFile) => {
       
       if (requestId && menuItems && menuItems.length > 0 && menuItems.length <= 5) {
         // Start polling for image updates if there are 5 or fewer items
-        startPollingForImages(requestId, menuItems, updateCallback);
+        pollForImages(requestId, menuItems, updateCallback);
       }
       
       // Return the initial menu items
@@ -165,7 +203,7 @@ export const extractMenuItems = async (imageFile) => {
       }
       
       // If it's a timeout, provide a more specific error
-      if (axiosError.message.includes('timeout')) {
+      if (axiosError.message.includes('timeout') || axiosError.message.includes('aborted')) {
         // Try to reset the API connection in the background
         resetApiConnection().catch(e => console.error('Error trying to reset connection after timeout:', e));
         
@@ -189,17 +227,30 @@ export const setMenuItemsUpdateCallback = (callback) => {
   updateCallback = callback;
 };
 
-// Poll for menu item updates
-const startPollingForImages = (requestId, initialItems, callback) => {
+// Poll for menu item updates - using setTimeout to avoid overlapping requests
+const pollForImages = async (requestId, initialItems, callback) => {
   if (DEBUG) console.log(`Starting to poll for images, requestId: ${requestId}`);
   
-  // Track if all items are done loading
-  let allDone = false;
+  // Create a new AbortController for polling
+  currentPollingController = new AbortController();
   
-  // Poll every 2 seconds
-  const pollInterval = setInterval(async () => {
+  // Set a timeout for the entire polling process (safety)
+  const maxPollingTime = 120000; // 2 minutes max polling time
+  const endTime = Date.now() + maxPollingTime;
+  
+  // Define recursive polling function
+  const executePoll = async () => {
+    // Check if we've exceeded our max polling time
+    if (Date.now() > endTime) {
+      if (DEBUG) console.log('Max polling time reached, stopping polling');
+      return;
+    }
+    
     try {
-      const response = await clientAxiosInstance.get(`${POLL_URL}/${requestId}`);
+      const response = await clientAxiosInstance.get(`${POLL_URL}/${requestId}`, {
+        timeout: 5000, // 5 second timeout for poll requests
+        signal: currentPollingController.signal
+      });
       
       if (DEBUG) console.log('Poll response:', response.data);
       
@@ -207,29 +258,32 @@ const startPollingForImages = (requestId, initialItems, callback) => {
       
       if (menuItems) {
         // Check if we're done polling (all items have non-loading status)
-        allDone = menuItems.every(item => item.imageStatus !== 'loading');
+        const allDone = menuItems.every(item => item.imageStatus !== 'loading');
         
         // Call the update callback
         if (callback) callback(menuItems);
         
-        // Stop polling when all images are done
+        // If all done, stop polling
         if (allDone) {
           if (DEBUG) console.log('All images processed, stopping polling');
-          clearInterval(pollInterval);
+          return;
         }
+        
+        // Schedule next poll after delay
+        setTimeout(executePoll, 2000);
       }
     } catch (error) {
+      if (error.name === 'AbortError' || error.message.includes('aborted')) {
+        if (DEBUG) console.log('Polling was aborted');
+        return;
+      }
+      
       console.error('Error polling for image updates:', error);
-      // Stop polling on error
-      clearInterval(pollInterval);
+      // Try one more time after a slightly longer delay before giving up
+      setTimeout(executePoll, 5000);
     }
-  }, 2000);
+  };
   
-  // Stop polling after 2 minutes as a safety measure
-  setTimeout(() => {
-    if (!allDone) {
-      if (DEBUG) console.log('Polling timeout reached, stopping polling');
-      clearInterval(pollInterval);
-    }
-  }, 120000);
+  // Start the polling process
+  executePoll();
 }; 
