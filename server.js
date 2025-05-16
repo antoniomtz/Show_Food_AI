@@ -4,6 +4,15 @@ const axios = require('axios');
 const https = require('https'); // Import https module
 require('dotenv').config();
 
+// Hardcoded NVIDIA API URL and model instead of using environment variables
+const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_MODEL = 'meta/llama-4-scout-17b-16e-instruct';
+// Still use environment variable for the API token as it's sensitive
+const NVIDIA_API_TOKEN = process.env.VITE_NVIDIA_API_TOKEN;
+
+// Hardcoded Stable Diffusion API URL
+const STABLE_DIFFUSION_API_URL = "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-3-medium";
+
 // Create an HTTPS agent with keepAlive set to false
 const httpsAgentNoKeepAlive = new https.Agent({ keepAlive: false });
 
@@ -56,12 +65,9 @@ app.post('/api/analyze-menu', async (req, res) => {
       return res.status(400).json({ error: 'Image is required' });
     }
     
-    const API_URL = process.env.VITE_NVIDIA_API_URL;
-    const API_TOKEN = process.env.VITE_NVIDIA_API_TOKEN;
-    const MODEL = process.env.VITE_NVIDIA_MODEL;
-    
-    console.log('Using API URL:', API_URL);
-    console.log('Using Model:', MODEL);
+    // Use hardcoded values instead of environment variables
+    console.log('Using API URL:', NVIDIA_API_URL);
+    console.log('Using Model:', NVIDIA_MODEL);
     
     try {
       // Forward the request to Nvidia API with increased timeout
@@ -73,9 +79,9 @@ app.post('/api/analyze-menu', async (req, res) => {
         try {
           console.log(`API request attempt ${retryCount + 1}/${maxRetries + 1}`);
           apiResponse = await axios.post(
-            API_URL,
+            NVIDIA_API_URL,
             {
-              model: MODEL,
+              model: NVIDIA_MODEL,
               messages: [
                 {
                   role: 'user',
@@ -89,7 +95,7 @@ app.post('/api/analyze-menu', async (req, res) => {
             },
             {
               headers: {
-                'Authorization': `Bearer ${API_TOKEN}`,
+                'Authorization': `Bearer ${NVIDIA_API_TOKEN}`,
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
               },
@@ -267,21 +273,18 @@ function updateMenuItemsStatus(requestId, status) {
 // Prewarm the API to reduce initial request latency
 async function prewarmAPI() {
   console.log('Pre-warming the Nvidia API to reduce initial request latency...');
-  const API_URL = process.env.VITE_NVIDIA_API_URL;
-  const API_TOKEN = process.env.VITE_NVIDIA_API_TOKEN;
-  const MODEL = process.env.VITE_NVIDIA_MODEL;
   
-  if (!API_URL || !API_TOKEN || !MODEL) {
-    console.log('Missing API configuration, skipping pre-warming');
+  if (!NVIDIA_API_TOKEN) {
+    console.log('Missing API token, skipping pre-warming');
     return;
   }
   
   try {
     // Send a minimal request to initialize the model
     await axios.post(
-      API_URL,
+      NVIDIA_API_URL,
       {
-        model: MODEL,
+        model: NVIDIA_MODEL,
         messages: [
           {
             role: 'user',
@@ -295,7 +298,7 @@ async function prewarmAPI() {
       },
       {
         headers: {
-          'Authorization': `Bearer ${API_TOKEN}`,
+          'Authorization': `Bearer ${NVIDIA_API_TOKEN}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
@@ -349,13 +352,10 @@ function isValidBase64(str) {
 async function generateFoodImage(description) {
   try {
     // Check if the API token is available
-    if (!process.env.VITE_NVIDIA_API_TOKEN) {
+    if (!NVIDIA_API_TOKEN) {
       console.log('No Nvidia API token found. Skipping image generation.');
       return null;
     }
-    
-    // Keep the Stable Diffusion v3 endpoint unchanged as requested
-    const invokeUrl = "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-3-medium";
     
     // Create a concise prompt for better results
     const prompt = `A delicious ${description}. Professional food photograph, high quality`;
@@ -378,11 +378,11 @@ async function generateFoodImage(description) {
     try {
       // Use axios with error handling
       const response = await axios.post(
-        invokeUrl,
+        STABLE_DIFFUSION_API_URL,
         payload,
         {
           headers: {
-            "Authorization": `Bearer ${process.env.VITE_NVIDIA_API_TOKEN}`,
+            "Authorization": `Bearer ${NVIDIA_API_TOKEN}`,
             "Content-Type": "application/json",
             "Accept": "application/json"
           },
