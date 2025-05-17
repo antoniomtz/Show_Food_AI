@@ -4,7 +4,7 @@
 
 Menu Analyzer is a web application that uses AI to analyze restaurant menu photos. Upload an image of a restaurant menu and get a structured list of menu items with AI-generated images of each dish and its approximate calories.
 
-## Demo
+## Demo (youtube)
 
 [![Demo](https://img.youtube.com/vi/SuvBUBrn4Eg/0.jpg)](https://www.youtube.com/watch?v=SuvBUBrn4Eg)
 
