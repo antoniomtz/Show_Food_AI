@@ -6,7 +6,9 @@ Menu Analyzer is a web application that uses AI to analyze restaurant menu photo
 
 ## Demo (youtube)
 
-[![Demo](https://github.com/user-attachments/assets/d981942c-c37c-4d10-a535-0978b10af53f)](https://www.youtube.com/watch?v=SuvBUBrn4Eg)
+<a href="https://www.youtube.com/watch?v=SuvBUBrn4Eg">
+  <img src="https://github.com/user-attachments/assets/d981942c-c37c-4d10-a535-0978b10af53f" width="400"/>
+</a>
 
 ## Features
 
