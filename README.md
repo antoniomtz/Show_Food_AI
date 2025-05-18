@@ -19,6 +19,7 @@ Menu Analyzer is a web application that uses AI to analyze restaurant menu photo
 - Calories calculation via prompt-engineering
 - Progressive loading with real-time updates
 - Responsive, modern UI built with React and Tailwind CSS
+- API prewarming to reduce cold-start latency
 
 ## Installation
 
@@ -68,6 +69,11 @@ Menu Analyzer is a web application that uses AI to analyze restaurant menu photo
 2. The application extracts menu items using an AI model
 3. If the menu has 5 or fewer items, AI-generated images are created for each dish
 4. Results are displayed as cards with dish name, description, and image
+
+## Performance Notes
+
+- The Stable Diffusion API from NVIDIA NIM has a cold start period. The first couple of image generation calls may be slow, but subsequent calls will be much faster.
+- API prewarming is implemented to minimize cold start latency where possible.
 
 ## Technologies Used
 

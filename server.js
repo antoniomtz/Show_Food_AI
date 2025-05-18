@@ -264,6 +264,7 @@ async function prewarmAPI() {
   }
   
   try {
+    // Prewarm NVIDIA LLM API
     await axios.post(
       config.nvidia.apiUrl,
       {
@@ -284,8 +285,34 @@ async function prewarmAPI() {
         httpsAgent
       }
     );
+    
+    // Prewarm Stable Diffusion API
+    await axios.post(
+      config.stableDiffusion.apiUrl,
+      {
+        "prompt": "A delicious plate of food. Professional food photograph",
+        "negative_prompt": "blurry, text, watermark, low quality",
+        "aspect_ratio": "1:1",
+        "seed": 0,
+        "steps": 20,
+        "cfg_scale": 5
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${config.nvidia.apiToken}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        timeout: config.stableDiffusion.timeout,
+        validateStatus: false,
+        httpsAgent
+      }
+    );
+    
     state.prewarmDone = true;
+    console.log("API prewarming completed successfully");
   } catch (error) {
+    console.log("API prewarming failed:", error.message);
     // Silently continue - first real request may be slow
   }
 }
